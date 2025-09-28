@@ -3,6 +3,8 @@
   <component name="SqlDialectMappings">
     <file url="file://$PROJECT_DIR$/iosu_create_tables.sql" dialect="Oracle" />
     <file url="file://$PROJECT_DIR$/iosu_lab2.sql" dialect="Oracle" />
+    <file url="file://$PROJECT_DIR$/iosu_lab3.sql" dialect="Oracle" />
+    <file url="file://$PROJECT_DIR$/iosu_lab4.sql" dialect="Oracle" />
     <file url="file://$PROJECT_DIR$/test_data_insertion.sql" dialect="Oracle" />
   </component>
 </project>

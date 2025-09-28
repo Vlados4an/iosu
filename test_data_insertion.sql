@@ -68,3 +68,20 @@ INSERT INTO payment (amount, payment_date, insurance_contract_id) VALUES (2200.0
 INSERT INTO payment (amount, payment_date, insurance_contract_id) VALUES (1100.00, DATE '2023-09-30', 13);
 INSERT INTO payment (amount, payment_date, insurance_contract_id) VALUES (700.00, DATE '2023-08-15', 14);
 INSERT INTO payment (amount, payment_date, insurance_contract_id) VALUES (1600.00, DATE '2023-07-10', 15);
+
+-- Добавляем поле salary к таблице agent
+ALTER TABLE agent ADD salary NUMBER(10,2) DEFAULT 0;
+
+-- Обновляем существующие записи с зарплатами
+UPDATE agent SET salary = 2000 WHERE id = 1;
+UPDATE agent SET salary = 1800 WHERE id = 2;
+UPDATE agent SET salary = 2200 WHERE id = 3;
+UPDATE agent SET salary = 1900 WHERE id = 4;
+UPDATE agent SET salary = 2100 WHERE id = 5;
+UPDATE agent SET salary = 1700 WHERE id = 6;
+UPDATE agent SET salary = 2300 WHERE id = 7;
+UPDATE agent SET salary = 1950 WHERE id = 8;
+UPDATE agent SET salary = 2050 WHERE id = 9;
+UPDATE agent SET salary = 1850 WHERE id = 10;
+
+COMMIT;
