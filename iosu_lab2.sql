@@ -77,3 +77,82 @@ GROUP BY EXTRACT(YEAR FROM contract_date), TO_CHAR(contract_date, 'Q')
 HAVING COUNT(*) > 0
 ORDER BY year DESC, quarter DESC;
 
+-- Найти всех агентов и клиентов, у которых заключены договоры с типом страхования "Жизнь", используя NATURAL JOIN
+SELECT
+    a.first_name AS agent_first_name,
+    a.last_name AS agent_last_name,
+    c.first_name AS client_first_name,
+    c.last_name AS client_last_name,
+    it.name AS insurance_type,
+    ic.contract_date
+FROM agent a
+         NATURAL JOIN insurance_contract ic
+         JOIN client c ON ic.client_id = c.id
+         JOIN insurance_type it ON ic.insurance_type_id = it.id
+WHERE it.name = 'Жизнь'
+ORDER BY a.last_name, a.first_name, ic.contract_date DESC;
+
+-- Показать всех агентов и всех клиентов, даже если у некоторых нет заключенных договоров
+SELECT
+    a.first_name AS agent_first_name,
+    a.last_name AS agent_last_name,
+    c.first_name AS client_first_name,
+    c.last_name AS client_last_name,
+    ic.contract_date,
+    it.name AS insurance_type
+FROM agent a
+         FULL JOIN insurance_contract ic ON a.id = ic.agent_id
+         FULL JOIN client c ON ic.client_id = c.id
+         LEFT JOIN insurance_type it ON ic.insurance_type_id = it.id
+ORDER BY
+    CASE WHEN a.last_name IS NULL THEN 1 ELSE 0 END,
+    a.last_name,
+    c.last_name;
+
+-- Найти клиентов, которые имеют договоры страхования с максимальной суммой выплаты
+SELECT
+    c.first_name,
+    c.last_name,
+    c.birth_date,
+    it.name AS insurance_type,
+    it.max_payout
+FROM client c
+         JOIN insurance_contract ic ON c.id = ic.client_id
+         JOIN insurance_type it ON ic.insurance_type_id = it.id
+WHERE it.max_payout IN (
+    SELECT MAX(max_payout)
+    FROM insurance_type
+    WHERE max_payout IS NOT NULL
+)
+ORDER BY c.last_name, c.first_name;
+
+-- Найти агентов, у которых есть клиенты старше среднего возраста всех клиентов
+SELECT DISTINCT
+    a.first_name,
+    a.last_name,
+    a.phone_number,
+    (SELECT ROUND(AVG(MONTHS_BETWEEN(SYSDATE, birth_date)/12))
+     FROM client) AS average_age
+FROM agent a
+         JOIN insurance_contract ic ON a.id = ic.agent_id
+         JOIN client c ON ic.client_id = c.id
+WHERE MONTHS_BETWEEN(SYSDATE, c.birth_date)/12 > ANY (
+    SELECT MONTHS_BETWEEN(SYSDATE, birth_date)/12
+    FROM client
+)
+ORDER BY a.last_name, a.first_name;
+
+-- Найти клиентов, у которых никогда не было страховых случаев
+SELECT
+    c.first_name,
+    c.last_name,
+    c.birth_date,
+    c.phone_number
+FROM client c
+WHERE NOT EXISTS (
+    SELECT 1
+    FROM insurance_contract ic
+             JOIN compensation_claim cc ON ic.id = cc.insurance_contract_id
+    WHERE ic.client_id = c.id
+)
+ORDER BY c.last_name, c.first_name;
