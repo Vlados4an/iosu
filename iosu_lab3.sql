@@ -98,8 +98,6 @@ FROM insurance_contracts_detailed_view
 WHERE "Фамилия_клиента" = 'Сидорова';
 -- Ошибка: "ORA-01752: не могу удалять из представления без таблицы, сохраняющей ключ"
 
--- Обновляемое представление с ограничением по времени
-
 -- Представление для работы с клиентами только в рабочие дни и часы
 CREATE OR REPLACE VIEW clients_working_hours_view AS
 SELECT
@@ -111,8 +109,6 @@ SELECT
 FROM client
 WITH CHECK OPTION;
 
--- Создание триггера для ограничения по времени работы:
-
 -- Триггер для ограничения по времени работы
 CREATE OR REPLACE TRIGGER clients_working_hours_trigger
     INSTEAD OF INSERT OR UPDATE OR DELETE ON clients_working_hours_view
@@ -123,29 +119,22 @@ DECLARE
     v_timezone      VARCHAR2(50);
     v_current_time  TIMESTAMP WITH TIME ZONE;
 BEGIN
-    -- Часовой пояс БД
     SELECT DBTIMEZONE INTO v_timezone FROM dual;
 
-    -- Текущее время с часовым поясом
     v_current_time := FROM_TZ(CAST(SYSDATE AS TIMESTAMP), v_timezone);
-
-    -- День недели (в русской локали) и час
     v_current_day := TO_CHAR(v_current_time, 'DY', 'NLS_DATE_LANGUAGE=RUSSIAN');
     v_current_hour := EXTRACT(HOUR FROM v_current_time);
 
-    -- Проверка рабочих дней (понедельник–пятница)
     IF v_current_day IN ('СБ','ВС') THEN
         RAISE_APPLICATION_ERROR(-20001,
                                 'Операции разрешены только в рабочие дни (пн–пт). Сегодня: ' || v_current_day);
     END IF;
 
-    -- Проверка часов (9–17)
     IF v_current_hour < 9 OR v_current_hour >= 17 THEN
         RAISE_APPLICATION_ERROR(-20002,
                                 'Операции разрешены только с 9:00 до 17:00. Сейчас: ' || v_current_hour || ':00');
     END IF;
 
-    -- Выполняем DML
     CASE
         WHEN INSERTING THEN
             INSERT INTO client (id, first_name, last_name, birth_date, phone_number)
