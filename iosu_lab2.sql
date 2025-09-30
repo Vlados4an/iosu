@@ -4,6 +4,13 @@
 -- «Общий список клиентов и агентов с количеством договоров у каждого» (запрос на объединение);
 -- «Заключенные до-говора по кварталам за два последних года» (запрос по полю с типом дата).
 
+--Обновление невыплаченной премии на основе платежей
+UPDATE insurance_contract ic
+SET unpaid_premium = ic.premium - NVL((SELECT SUM(p.amount)
+                                       FROM payment p
+                                       WHERE p.insurance_contract_id = ic.id), 0)
+WHERE ic.contract_status = 'ACTIVE';
+
 -- Клиенты, застраховавшие свою жизнь за последний месяц
 SELECT c.first_name     AS first_name,
        c.last_name      AS last_name,
@@ -72,20 +79,17 @@ HAVING COUNT(*) > 0
 ORDER BY year DESC, quarter DESC;
 
 -- Получить список всех заключённых страховых контрактов с указанием данных клиента, страхового агента, даты заключения договора и суммы страховой премии используя USING.
-SELECT
-    c.first_name  AS client_first_name,
-    c.last_name   AS client_last_name,
-    ic.contract_date,
-    a.first_name  AS agent_first_name,
-    a.last_name   AS agent_last_name,
-    ic.premium
-FROM (
-         SELECT id AS client_id, first_name, last_name FROM client
-     ) c
+SELECT c.first_name AS client_first_name,
+       c.last_name  AS client_last_name,
+       ic.contract_date,
+       a.first_name AS agent_first_name,
+       a.last_name  AS agent_last_name,
+       ic.premium
+FROM (SELECT id AS client_id, first_name, last_name
+      FROM client) c
          JOIN insurance_contract ic USING (client_id)
-         JOIN (
-    SELECT id AS agent_id, first_name, last_name FROM agent
-) a USING (agent_id);
+         JOIN (SELECT id AS agent_id, first_name, last_name
+               FROM agent) a USING (agent_id);
 
 -- Показать всех агентов и всех клиентов, даже если у некоторых нет заключенных договоров
 SELECT a.first_name AS agent_first_name,
@@ -104,10 +108,10 @@ ORDER BY CASE WHEN a.last_name IS NULL THEN 1 ELSE 0 END,
 
 -- Найти клиентов, которые имеют договоры страхования с максимальной суммой выплаты
 SELECT DISTINCT c.first_name,
-       c.last_name,
-       c.birth_date,
-       it.name AS insurance_type,
-       it.max_payout
+                c.last_name,
+                c.birth_date,
+                it.name AS insurance_type,
+                it.max_payout
 FROM client c
          JOIN insurance_contract ic ON c.id = ic.client_id
          JOIN insurance_type it ON ic.insurance_type_id = it.id
