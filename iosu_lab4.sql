@@ -81,7 +81,7 @@ END increase_top_agents_salary;
 -- END;
 
 --Создание функции
--- Функция возвращает количество клиентов с истекающими сроками страхования
+-- Функция возвращает количество клиентов с истекающими сроками оплаты по договорам
 CREATE OR REPLACE FUNCTION get_expiring_contracts_count(
     p_days_threshold IN NUMBER DEFAULT 30
 ) RETURN NUMBER
@@ -95,40 +95,43 @@ CREATE OR REPLACE FUNCTION get_expiring_contracts_count(
     v_first_name client.first_name%TYPE;
     v_last_name client.last_name%TYPE;
     v_contract_date insurance_contract.contract_date%TYPE;
+    v_deadline_date DATE;
     v_days_remaining NUMBER;
 BEGIN
     IF p_days_threshold <= 0 THEN
         RAISE_APPLICATION_ERROR(-20020, 'Пороговое значение дней должно быть положительным');
     END IF;
 
-    DBMS_OUTPUT.PUT_LINE('=== КЛИЕНТЫ С ИСТЕКАЮЩИМИ ДОГОВОРАМИ (менее ' || p_days_threshold || ' дней) ===');
+    DBMS_OUTPUT.PUT_LINE('=== КЛИЕНТЫ С ИСТЕКАЮЩИМИ СРОКАМИ ОПЛАТЫ (меньше ' || p_days_threshold || ' дней) ===');
 
     OPEN client_cursor FOR
         SELECT DISTINCT
             c.id,
             c.first_name,
             c.last_name,
-            MAX(ic.contract_date) AS last_contract_date,
-            TRUNC(MONTHS_BETWEEN(SYSDATE, MAX(ic.contract_date))/12 * 365) AS days_since_contract
+            ic.contract_date,
+            (ic.contract_date + ic.payout_deadline) AS deadline_date,
+            TRUNC((ic.contract_date + ic.payout_deadline) - SYSDATE) AS days_remaining
         FROM client c
                  JOIN insurance_contract ic ON c.id = ic.client_id
         WHERE ic.contract_status = 'Активен'
-        GROUP BY c.id, c.first_name, c.last_name
-        HAVING TRUNC(MONTHS_BETWEEN(SYSDATE, MAX(ic.contract_date))/12 * 365) >= (365 - p_days_threshold)
-        ORDER BY days_since_contract DESC;
+          AND TRUNC((ic.contract_date + ic.payout_deadline) - SYSDATE) < p_days_threshold
+          AND TRUNC((ic.contract_date + ic.payout_deadline) - SYSDATE) >= 0
+        ORDER BY days_remaining ASC;
 
     LOOP
-        FETCH client_cursor INTO v_client_id, v_first_name, v_last_name, v_contract_date, v_days_remaining;
+        FETCH client_cursor INTO v_client_id, v_first_name, v_last_name, v_contract_date, v_deadline_date, v_days_remaining;
         EXIT WHEN client_cursor%NOTFOUND;
 
         v_client_count := v_client_count + 1;
 
         DBMS_OUTPUT.PUT_LINE('Клиент: ' || v_first_name || ' ' || v_last_name ||
                              ', Дата договора: ' || TO_CHAR(v_contract_date, 'DD.MM.YYYY') ||
-                             ', Прошло дней: ' || v_days_remaining);
+                             ', Крайний срок оплаты: ' || TO_CHAR(v_deadline_date, 'DD.MM.YYYY') ||
+                             ', Осталось дней: ' || v_days_remaining);
     END LOOP;
 
-    DBMS_OUTPUT.PUT_LINE('Обработано записей: ' || client_cursor%ROWCOUNT);
+    DBMS_OUTPUT.PUT_LINE('Обработано записей: ' || v_client_count);
 
     CLOSE client_cursor;
 
@@ -146,12 +149,13 @@ EXCEPTION
 END get_expiring_contracts_count;
 /
 
--- DECLARE
---     v_count NUMBER;
--- BEGIN
---     v_count := get_expiring_contracts_count(30);
---     DBMS_OUTPUT.PUT_LINE('Найдено клиентов: ' || v_count);
--- END;
+
+DECLARE
+    v_count NUMBER;
+BEGIN
+    v_count := get_expiring_contracts_count(30);
+    DBMS_OUTPUT.PUT_LINE('Найдено клиентов: ' || v_count);
+END;
 
 -- Создать локальную программу, изменив код ранее написанной проце-дуры или функции.
 CREATE OR REPLACE PROCEDURE increase_top_agents_salary_local(
@@ -581,40 +585,43 @@ CREATE OR REPLACE PACKAGE BODY insurance_pkg IS
         v_first_name client.first_name%TYPE;
         v_last_name client.last_name%TYPE;
         v_contract_date insurance_contract.contract_date%TYPE;
+        v_deadline_date DATE;
         v_days_remaining NUMBER;
     BEGIN
         IF p_days_threshold <= 0 THEN
             RAISE_APPLICATION_ERROR(-20020, 'Пороговое значение дней должно быть положительным');
         END IF;
 
-        DBMS_OUTPUT.PUT_LINE('=== КЛИЕНТЫ С ИСТЕКАЮЩИМИ ДОГОВОРАМИ (менее ' || p_days_threshold || ' дней) ===');
+        DBMS_OUTPUT.PUT_LINE('=== КЛИЕНТЫ С ИСТЕКАЮЩИМИ СРОКАМИ ОПЛАТЫ (меньше ' || p_days_threshold || ' дней) ===');
 
         OPEN client_cursor FOR
             SELECT DISTINCT
                 c.id,
                 c.first_name,
                 c.last_name,
-                MAX(ic.contract_date) AS last_contract_date,
-                TRUNC(MONTHS_BETWEEN(SYSDATE, MAX(ic.contract_date))/12 * 365) AS days_since_contract
+                ic.contract_date,
+                (ic.contract_date + ic.payout_deadline) AS deadline_date,
+                TRUNC((ic.contract_date + ic.payout_deadline) - SYSDATE) AS days_remaining
             FROM client c
                      JOIN insurance_contract ic ON c.id = ic.client_id
             WHERE ic.contract_status = 'Активен'
-            GROUP BY c.id, c.first_name, c.last_name
-            HAVING TRUNC(MONTHS_BETWEEN(SYSDATE, MAX(ic.contract_date))/12 * 365) >= (365 - p_days_threshold)
-            ORDER BY days_since_contract DESC;
+              AND TRUNC((ic.contract_date + ic.payout_deadline) - SYSDATE) < p_days_threshold
+              AND TRUNC((ic.contract_date + ic.payout_deadline) - SYSDATE) >= 0
+            ORDER BY days_remaining ASC;
 
         LOOP
-            FETCH client_cursor INTO v_client_id, v_first_name, v_last_name, v_contract_date, v_days_remaining;
+            FETCH client_cursor INTO v_client_id, v_first_name, v_last_name, v_contract_date, v_deadline_date, v_days_remaining;
             EXIT WHEN client_cursor%NOTFOUND;
 
             v_client_count := v_client_count + 1;
 
             DBMS_OUTPUT.PUT_LINE('Клиент: ' || v_first_name || ' ' || v_last_name ||
                                  ', Дата договора: ' || TO_CHAR(v_contract_date, 'DD.MM.YYYY') ||
-                                 ', Прошло дней: ' || v_days_remaining);
+                                 ', Крайний срок оплаты: ' || TO_CHAR(v_deadline_date, 'DD.MM.YYYY') ||
+                                 ', Осталось дней: ' || v_days_remaining);
         END LOOP;
 
-        DBMS_OUTPUT.PUT_LINE('Обработано записей: ' || client_cursor%ROWCOUNT);
+        DBMS_OUTPUT.PUT_LINE('Обработано записей: ' || v_client_count);
 
         CLOSE client_cursor;
 
@@ -630,7 +637,6 @@ CREATE OR REPLACE PACKAGE BODY insurance_pkg IS
             DBMS_OUTPUT.PUT_LINE('Ошибка в функции: ' || SQLERRM);
             RAISE;
     END get_expiring_contracts_count;
-
 END insurance_pkg;
 /
 
