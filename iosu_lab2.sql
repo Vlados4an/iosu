@@ -71,19 +71,21 @@ GROUP BY EXTRACT(YEAR FROM contract_date), TO_CHAR(contract_date, 'Q')
 HAVING COUNT(*) > 0
 ORDER BY year DESC, quarter DESC;
 
--- Найти всех агентов и клиентов, у которых заключены договоры с типом страхования "Жизнь", используя NATURAL JOIN
-SELECT a.first_name AS agent_first_name,
-       a.last_name  AS agent_last_name,
-       c.first_name AS client_first_name,
-       c.last_name  AS client_last_name,
-       it.name      AS insurance_type,
-       ic.contract_date
-FROM agent a
-         NATURAL JOIN insurance_contract ic
-         JOIN client c ON ic.client_id = c.id
-         JOIN insurance_type it ON ic.insurance_type_id = it.id
-WHERE it.name = 'Жизнь'
-ORDER BY a.last_name, a.first_name, ic.contract_date DESC;
+-- Получить список всех заключённых страховых контрактов с указанием данных клиента, страхового агента, даты заключения договора и суммы страховой премии используя USING.
+SELECT
+    c.first_name  AS client_first_name,
+    c.last_name   AS client_last_name,
+    ic.contract_date,
+    a.first_name  AS agent_first_name,
+    a.last_name   AS agent_last_name,
+    ic.premium
+FROM (
+         SELECT id AS client_id, first_name, last_name FROM client
+     ) c
+         JOIN insurance_contract ic USING (client_id)
+         JOIN (
+    SELECT id AS agent_id, first_name, last_name FROM agent
+) a USING (agent_id);
 
 -- Показать всех агентов и всех клиентов, даже если у некоторых нет заключенных договоров
 SELECT a.first_name AS agent_first_name,
@@ -101,7 +103,7 @@ ORDER BY CASE WHEN a.last_name IS NULL THEN 1 ELSE 0 END,
          c.last_name;
 
 -- Найти клиентов, которые имеют договоры страхования с максимальной суммой выплаты
-SELECT c.first_name,
+SELECT DISTINCT c.first_name,
        c.last_name,
        c.birth_date,
        it.name AS insurance_type,
