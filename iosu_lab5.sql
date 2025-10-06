@@ -169,6 +169,8 @@ BEGIN
 END;
 /
 
+-- INSERT INTO insurance_contract (contract_date, contract_status, payout_deadline, agent_id, client_id, insurance_type_id, premium, unpaid_premium) VALUES (DATE '2024-03-25', 'Активен', 30, 1, 1, 1, 1200.00, 0.00);
+
 
 -- 2)Следить за суммами выплат, начислять пеню за просроченные выплаты.
 ALTER TABLE payment
@@ -194,6 +196,9 @@ BEGIN
 END;
 /
 
+-- INSERT INTO payment (insurance_contract_id, amount, payment_date)
+-- VALUES (1, 2000, SYSDATE + 400);
+
 -- 3)Переносить в архив старые договора, указывая сумму страховки и выплаты по страховым случаям, если они были.
 CREATE TABLE insurance_contract_archive AS
 SELECT *
@@ -206,49 +211,76 @@ ALTER TABLE insurance_contract_archive
         );
 
 CREATE OR REPLACE TRIGGER trg_contract_archive
-    AFTER UPDATE OF contract_status
+    FOR UPDATE OF contract_status
     ON insurance_contract
-    FOR EACH ROW
-DECLARE
-    v_total_payout NUMBER;
+    COMPOUND TRIGGER
+    TYPE t_contract_ids IS TABLE OF insurance_contract.id%TYPE;
+    g_ids t_contract_ids := t_contract_ids();
+
+AFTER EACH ROW IS
 BEGIN
-    IF :NEW.contract_status = 'Завершен' THEN
-        SELECT NVL(SUM(cc.approved_amount), 0)
-        INTO v_total_payout
-        FROM compensation_claim cc
-        WHERE cc.insurance_contract_id = :NEW.id;
-
-        INSERT INTO insurance_contract_archive
-        SELECT c.*, v_total_payout
-        FROM insurance_contract c
-        WHERE c.id = :NEW.id;
-
-        DELETE FROM insurance_contract WHERE id = :NEW.id;
+    IF :NEW.contract_status = 'Завершён' THEN
+        g_ids.EXTEND;
+        g_ids(g_ids.LAST) := :NEW.id;
     END IF;
-END;
+END AFTER EACH ROW;
+
+    AFTER STATEMENT IS
+    BEGIN
+        FOR i IN 1 .. g_ids.COUNT
+            LOOP
+                DECLARE
+                    v_total_payout NUMBER;
+                BEGIN
+                    SELECT NVL(SUM(cc.approved_amount), 0)
+                    INTO v_total_payout
+                    FROM compensation_claim cc
+                    WHERE cc.insurance_contract_id = g_ids(i);
+
+                    INSERT INTO insurance_contract_archive
+                    SELECT c.*, v_total_payout
+                    FROM insurance_contract c
+                    WHERE c.id = g_ids(i);
+
+                    DELETE
+                    FROM payment
+                    WHERE insurance_contract_id = g_ids(i);
+                    DELETE
+                    FROM compensation_claim
+                    WHERE insurance_contract_id = g_ids(i);
+                    DELETE FROM insurance_contract WHERE id = g_ids(i);
+                END;
+            END LOOP;
+    END AFTER STATEMENT;
+    END trg_contract_archive;
 /
+
 
 CREATE OR REPLACE PROCEDURE proc_check_and_archive IS
 BEGIN
     UPDATE insurance_contract
-    SET contract_status = 'Завершен'
-    WHERE contract_status = 'Завершен';
+    SET contract_status = 'Завершён'
+    WHERE contract_status = 'Завершён';
 
     COMMIT;
 END;
 /
 
 BEGIN
-    DBMS_SCHEDULER.create_job (
-            job_name        => 'JOB_TRIGGER_ARCHIVE',
-            job_type        => 'STORED_PROCEDURE',
-            job_action      => 'PROC_CHECK_AND_ARCHIVE',
-            start_date      => SYSTIMESTAMP,
+    DBMS_SCHEDULER.create_job(
+            job_name => 'JOB_TRIGGER_ARCHIVE',
+            job_type => 'STORED_PROCEDURE',
+            job_action => 'PROC_CHECK_AND_ARCHIVE',
+            start_date => SYSTIMESTAMP,
             repeat_interval => 'FREQ=MINUTELY; INTERVAL=10',
-            enabled         => TRUE
+            enabled => TRUE
     );
 END;
 /
+
+-- UPDATE insurance_contract
+-- SET contract_status = 'Завершён'
+-- WHERE id = 1;
 
 -- Самостоятельно или при помощи преподавателя составить задание на
 -- DML триггер, который будет вызывать мутацию таблицы, на которую создан,
@@ -258,7 +290,8 @@ END;
 
 --будет мутация
 CREATE OR REPLACE TRIGGER trg_bad_client
-    AFTER INSERT ON client
+    AFTER INSERT
+    ON client
     FOR EACH ROW
 BEGIN
     INSERT INTO client(first_name) VALUES ('Added by trigger');
@@ -268,25 +301,38 @@ END;
 
 -- не будет мутации
 CREATE OR REPLACE TRIGGER trg_good_client
-    FOR INSERT ON client
+    FOR INSERT
+    ON client
     COMPOUND TRIGGER
-    TYPE t_names IS TABLE OF VARCHAR2(100);
-    g_names t_names := t_names();
+
+    -- коллекция для хранения новых строк
+    TYPE t_clients IS TABLE OF client%ROWTYPE;
+    g_clients t_clients := t_clients();
 
 AFTER EACH ROW IS
 BEGIN
-    g_names.EXTEND;
-    g_names(g_names.LAST) := :NEW.first_name || ' (copy)';
+    -- сохраняем каждую вставленную строку в коллекцию
+    g_clients.EXTEND;
+    g_clients(g_clients.LAST) := :NEW;
 END AFTER EACH ROW;
 
     AFTER STATEMENT IS
     BEGIN
-        FOR i IN 1 .. g_names.COUNT LOOP
-                INSERT INTO client(first_name) VALUES (g_names(i));
+        -- вставляем копии строк после завершения операции
+        FOR i IN 1 .. g_clients.COUNT
+            LOOP
+                INSERT INTO client (first_name, last_name, birth_date, phone_number)
+                VALUES (g_clients(i).first_name || ' (copy)',
+                        g_clients(i).last_name,
+                        g_clients(i).birth_date,
+                        g_clients(i).phone_number);
             END LOOP;
     END AFTER STATEMENT;
     END trg_good_client;
 /
+
+-- INSERT INTO client (first_name, last_name, birth_date, phone_number)
+-- VALUES ('Наталья', 'Захарова', DATE '1998-06-29', '+375491112233');
 
 -- Написать триггер INSTEAD OF для работы с не обновляемым представлением, созданным после выполнения п. 2.4 задания к лабораторной работе №3,
 -- проверить DML-командами возможность обновления представления после включения триггера (логика работы триггера определяется спецификой предметной области варианта).
@@ -299,7 +345,7 @@ DECLARE
     v_current_time TIMESTAMP WITH TIME ZONE;
 BEGIN
     v_current_time := SYSTIMESTAMP AT TIME ZONE 'Europe/Moscow';
-    v_current_day  := TO_CHAR(v_current_time, 'DY', 'NLS_DATE_LANGUAGE=RUSSIAN');
+    v_current_day := TO_CHAR(v_current_time, 'DY', 'NLS_DATE_LANGUAGE=RUSSIAN');
     v_current_hour := EXTRACT(HOUR FROM v_current_time);
 
     IF v_current_day IN ('СБ', 'ВС') THEN
@@ -307,29 +353,29 @@ BEGIN
                                 'Операции разрешены только в рабочие дни (пн–пт). Сегодня: ' || v_current_day);
     END IF;
 
-    IF v_current_hour < 9 OR v_current_hour >= 17 THEN
+    IF v_current_hour < 9 OR v_current_hour >= 23 THEN
         RAISE_APPLICATION_ERROR(-20002,
                                 'Операции разрешены только с 9:00 до 17:00. Сейчас: ' || v_current_hour || ':00');
     END IF;
 
     CASE
-        WHEN INSERTING THEN
-            INSERT INTO client (id, first_name, last_name, birth_date, phone_number)
-            VALUES (:NEW.id, :NEW.first_name, :NEW.last_name, :NEW.birth_date, :NEW.phone_number);
+        WHEN INSERTING THEN INSERT INTO client (id, first_name, last_name, birth_date, phone_number)
+                            VALUES (:NEW.id, :NEW.first_name, :NEW.last_name, :NEW.birth_date, :NEW.phone_number);
 
-        WHEN UPDATING THEN
-            UPDATE client
-            SET first_name   = :NEW.first_name,
-                last_name    = :NEW.last_name,
-                birth_date   = :NEW.birth_date,
-                phone_number = :NEW.phone_number
-            WHERE id = :OLD.id;
+        WHEN UPDATING THEN UPDATE client
+                           SET first_name   = :NEW.first_name,
+                               last_name    = :NEW.last_name,
+                               birth_date   = :NEW.birth_date,
+                               phone_number = :NEW.phone_number
+                           WHERE id = :OLD.id;
 
-        WHEN DELETING THEN
-            DELETE FROM client WHERE id = :OLD.id;
+        WHEN DELETING THEN DELETE FROM client WHERE id = :OLD.id;
         END CASE;
 END;
 /
+
+-- INSERT INTO clients_working_hours_view (first_name, last_name, birth_date, phone_number)
+-- VALUES ('Sergey', 'Sidorov', DATE '1995-03-15', '+375297837832');
 
 
 
