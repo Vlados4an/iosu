@@ -100,24 +100,35 @@ WHERE "Фамилия_клиента" = 'Сидорова';
 
 -- Представление для работы с клиентами только в рабочие дни и часы
 CREATE OR REPLACE VIEW clients_working_hours_view AS
-SELECT
-    id,
-    first_name,
-    last_name,
-    birth_date,
-    phone_number
+SELECT id,
+       first_name,
+       last_name,
+       birth_date,
+       phone_number
 FROM client
+WITH CHECK OPTION;
+
+CREATE OR REPLACE VIEW clients_working_hours_view AS
+SELECT id,
+       first_name,
+       last_name,
+       birth_date,
+       phone_number
+FROM client
+WHERE TO_CHAR(SYSTIMESTAMP AT TIME ZONE 'Europe/Moscow', 'DY', 'NLS_DATE_LANGUAGE=RUSSIAN') NOT IN ('СБ', 'ВС')
+  AND EXTRACT(HOUR FROM (SYSTIMESTAMP AT TIME ZONE 'Europe/Moscow')) BETWEEN 9 AND 22
 WITH CHECK OPTION;
 
 -- Триггер для ограничения по времени работы
 CREATE OR REPLACE TRIGGER clients_working_hours_trigger
-    INSTEAD OF INSERT OR UPDATE OR DELETE ON clients_working_hours_view
+    INSTEAD OF INSERT OR UPDATE OR DELETE
+    ON clients_working_hours_view
     FOR EACH ROW
 DECLARE
-    v_current_day   VARCHAR2(20);
-    v_current_hour  NUMBER;
-    v_timezone      VARCHAR2(50);
-    v_current_time  TIMESTAMP WITH TIME ZONE;
+    v_current_day  VARCHAR2(20);
+    v_current_hour NUMBER;
+    v_timezone     VARCHAR2(50);
+    v_current_time TIMESTAMP WITH TIME ZONE;
 BEGIN
     SELECT DBTIMEZONE INTO v_timezone FROM dual;
 
@@ -125,7 +136,7 @@ BEGIN
     v_current_day := TO_CHAR(v_current_time, 'DY', 'NLS_DATE_LANGUAGE=RUSSIAN');
     v_current_hour := EXTRACT(HOUR FROM v_current_time);
 
-    IF v_current_day IN ('СБ','ВС') THEN
+    IF v_current_day IN ('СБ', 'ВС') THEN
         RAISE_APPLICATION_ERROR(-20001,
                                 'Операции разрешены только в рабочие дни (пн–пт). Сегодня: ' || v_current_day);
     END IF;
@@ -136,20 +147,17 @@ BEGIN
     END IF;
 
     CASE
-        WHEN INSERTING THEN
-            INSERT INTO client (id, first_name, last_name, birth_date, phone_number)
-            VALUES (:NEW.id, :NEW.first_name, :NEW.last_name, :NEW.birth_date, :NEW.phone_number);
+        WHEN INSERTING THEN INSERT INTO client (id, first_name, last_name, birth_date, phone_number)
+                            VALUES (:NEW.id, :NEW.first_name, :NEW.last_name, :NEW.birth_date, :NEW.phone_number);
 
-        WHEN UPDATING THEN
-            UPDATE client
-            SET first_name   = :NEW.first_name,
-                last_name    = :NEW.last_name,
-                birth_date   = :NEW.birth_date,
-                phone_number = :NEW.phone_number
-            WHERE id = :OLD.id;
+        WHEN UPDATING THEN UPDATE client
+                           SET first_name   = :NEW.first_name,
+                               last_name    = :NEW.last_name,
+                               birth_date   = :NEW.birth_date,
+                               phone_number = :NEW.phone_number
+                           WHERE id = :OLD.id;
 
-        WHEN DELETING THEN
-            DELETE FROM client WHERE id = :OLD.id;
+        WHEN DELETING THEN DELETE FROM client WHERE id = :OLD.id;
         END CASE;
 END;
 

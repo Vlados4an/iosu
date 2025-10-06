@@ -6,10 +6,18 @@
 
 --Обновление невыплаченной премии на основе платежей
 UPDATE insurance_contract ic
-SET unpaid_premium = ic.premium - NVL((SELECT SUM(p.amount)
-                                       FROM payment p
-                                       WHERE p.insurance_contract_id = ic.id), 0)
-WHERE ic.contract_status = 'ACTIVE';
+SET unpaid_premium =
+        CASE
+            WHEN ic.contract_status = 'Активен' THEN
+                ic.premium - NVL((
+                                     SELECT SUM(p.amount)
+                                     FROM payment p
+                                     WHERE p.insurance_contract_id = ic.id
+                                 ), 0)
+            WHEN ic.contract_status = 'Заморожен' THEN 0
+            ELSE unpaid_premium
+            END
+WHERE ic.contract_status IN ('Активен', 'Заморожен');
 
 -- Клиенты, застраховавшие свою жизнь за последний месяц
 SELECT c.first_name     AS first_name,
@@ -99,15 +107,15 @@ SELECT a.first_name AS agent_first_name,
        ic.contract_date,
        it.name      AS insurance_type
 FROM agent a
-         FULL JOIN insurance_contract ic ON a.id = ic.agent_id
-         FULL JOIN client c ON ic.client_id = c.id
+         LEFT JOIN insurance_contract ic ON a.id = ic.agent_id
+         RIGHT JOIN client c ON ic.client_id = c.id
          LEFT JOIN insurance_type it ON ic.insurance_type_id = it.id
 ORDER BY CASE WHEN a.last_name IS NULL THEN 1 ELSE 0 END,
          a.last_name,
          c.last_name;
 
 -- Найти клиентов, которые имеют договоры страхования с максимальной суммой выплаты
-SELECT DISTINCT c.first_name,
+SELECT c.first_name,
                 c.last_name,
                 c.birth_date,
                 it.name AS insurance_type,
@@ -115,9 +123,9 @@ SELECT DISTINCT c.first_name,
 FROM client c
          JOIN insurance_contract ic ON c.id = ic.client_id
          JOIN insurance_type it ON ic.insurance_type_id = it.id
-WHERE it.max_payout IN (SELECT MAX(max_payout)
-                        FROM insurance_type
-                        WHERE max_payout IS NOT NULL)
+WHERE it.max_payout not IN (SELECT AMOUNT
+                        FROM PAYMENT
+                        WHERE AMOUNT IS NOT NULL)
 ORDER BY c.last_name, c.first_name;
 
 -- Найти клиентов, у которых все договоры имеют статус "Активен"
@@ -126,11 +134,10 @@ SELECT c.first_name,
        COUNT(ic.id) AS active_contracts_count
 FROM client c
          JOIN insurance_contract ic ON c.id = ic.client_id
-WHERE ic.contract_status = ALL (SELECT contract_status
+WHERE ic.contract_status = ANY (SELECT contract_status
                                 FROM insurance_contract ic2
                                 WHERE ic2.client_id = c.id)
 GROUP BY c.id, c.first_name, c.last_name
-HAVING COUNT(ic.id) > 0
 ORDER BY active_contracts_count DESC;
 
 -- Найти клиентов, у которых никогда не было страховых случаев
