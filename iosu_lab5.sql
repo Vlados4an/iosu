@@ -377,6 +377,33 @@ END;
 -- INSERT INTO clients_working_hours_view (first_name, last_name, birth_date, phone_number)
 -- VALUES ('Sergey', 'Sidorov', DATE '1995-03-15', '+375297837832');
 
+-- -- Удаление DML триггера для логирования изменений в insurance_contract
+-- DROP TRIGGER trg_contract_log;
+--
+-- -- Удаление DDL триггера
+-- DROP TRIGGER trg_ddl_log;
+--
+-- -- Удаление системных триггеров
+-- DROP TRIGGER trg_logon;
+-- DROP TRIGGER trg_logoff;
+--
+-- -- Удаление триггера для бизнес-логики договоров
+-- DROP TRIGGER trg_contract_defaults;
+--
+-- -- Удаление триггера для пеней
+-- DROP TRIGGER trg_payment_penalty;
+--
+-- -- Удаление составного триггера архивации
+-- DROP TRIGGER trg_contract_archive;
+--
+-- -- Удаление проблемного триггера (вызывающего мутацию)
+-- DROP TRIGGER trg_bad_client;
+--
+-- -- Удаление составного триггера для клиентов
+-- DROP TRIGGER trg_good_client;
+--
+-- -- Удаление INSTEAD OF триггера для представления
+-- DROP TRIGGER clients_working_hours_trigger;
 
 
 
