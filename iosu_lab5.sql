@@ -34,6 +34,16 @@ BEGIN
 END;
 /
 
+-- Проверка INSERT
+INSERT INTO insurance_contract (id, contract_date, contract_status, payout_deadline, agent_id, client_id, insurance_type_id, premium, unpaid_premium)
+VALUES (1000, SYSDATE, 'Активен', 30, 1, 1, 1, 1000, 0);
+
+-- Проверка UPDATE
+UPDATE insurance_contract SET contract_status = 'Завершён' WHERE id = 1000;
+
+-- Проверка DELETE
+DELETE FROM insurance_contract WHERE id = 1000;
+
 
 -- Написать DDL-триггер, протоколирующий действия пользователей по
 -- созданию, изменению и удалению таблиц в схеме во вспомогательную таблицу
@@ -53,7 +63,7 @@ CREATE OR REPLACE TRIGGER trg_ddl_log
 DECLARE
     v_hour NUMBER := TO_NUMBER(TO_CHAR(SYSTIMESTAMP AT TIME ZONE 'Europe/Moscow', 'HH24'));
 BEGIN
-    IF v_hour BETWEEN 9 AND 17 THEN
+    IF v_hour BETWEEN 9 AND 24 THEN
         INSERT INTO LOG2(user_name, operation, object_name)
         VALUES (SYS_CONTEXT('USERENV', 'SESSION_USER'), ORA_SYSEVENT, ORA_DICT_OBJ_NAME);
     ELSE
@@ -62,16 +72,16 @@ BEGIN
 END;
 /
 
---Для теста
--- CREATE TABLE test_tbl (
--- id NUMBER
--- );
---
--- -- меняем структуру
--- ALTER TABLE test_tbl ADD name VARCHAR2(100);
---
--- -- удаляем
--- DROP TABLE test_tbl;
+-- Для теста
+CREATE TABLE test_tbl (
+id NUMBER
+);
+
+-- меняем структуру
+ALTER TABLE test_tbl ADD name VARCHAR2(100);
+
+-- удаляем
+DROP TABLE test_tbl;
 
 -- Написать системный триггер, добавляющий запись во вспомогательную
 -- таблицу LOG3, когда пользователь подключается или отключается. В таблицу
@@ -94,7 +104,7 @@ DECLARE
     v_cnt NUMBER;
 BEGIN
     SELECT COUNT(*) INTO v_cnt FROM insurance_contract;
-    INSERT INTO LOG3(user_name, activity, contract_cnt)
+    INSERT INTO EVLAD.LOG3(user_name, activity, contract_cnt)
     VALUES (USER, 'LOGON', v_cnt);
 END;
 /
@@ -106,7 +116,7 @@ DECLARE
     v_cnt NUMBER;
 BEGIN
     SELECT COUNT(*) INTO v_cnt FROM insurance_contract;
-    INSERT INTO LOG3(user_name, activity, contract_cnt)
+    INSERT INTO EVLAD.LOG3(user_name, activity, contract_cnt)
     VALUES (USER, 'LOGOFF', v_cnt);
 END;
 /
@@ -196,8 +206,8 @@ BEGIN
 END;
 /
 
--- INSERT INTO payment (insurance_contract_id, amount, payment_date)
--- VALUES (1, 2000, SYSDATE + 400);
+INSERT INTO payment (insurance_contract_id, amount, payment_date)
+VALUES (2, 2000, SYSDATE + 400);
 
 -- 3)Переносить в архив старые договора, указывая сумму страховки и выплаты по страховым случаям, если они были.
 CREATE TABLE insurance_contract_archive AS
@@ -212,9 +222,9 @@ ALTER TABLE insurance_contract_archive
 
 CREATE OR REPLACE TRIGGER trg_contract_archive
     FOR UPDATE OF contract_status
-    ON insurance_contract
+    ON EVLAD.insurance_contract
     COMPOUND TRIGGER
-    TYPE t_contract_ids IS TABLE OF insurance_contract.id%TYPE;
+    TYPE t_contract_ids IS TABLE OF EVLAD.insurance_contract.id%TYPE;
     g_ids t_contract_ids := t_contract_ids();
 
 AFTER EACH ROW IS
@@ -234,21 +244,21 @@ END AFTER EACH ROW;
                 BEGIN
                     SELECT NVL(SUM(cc.approved_amount), 0)
                     INTO v_total_payout
-                    FROM compensation_claim cc
+                    FROM EVLAD.compensation_claim cc
                     WHERE cc.insurance_contract_id = g_ids(i);
 
-                    INSERT INTO insurance_contract_archive
+                    INSERT INTO EVLAD.insurance_contract_archive
                     SELECT c.*, v_total_payout
-                    FROM insurance_contract c
+                    FROM EVLAD.insurance_contract c
                     WHERE c.id = g_ids(i);
 
                     DELETE
-                    FROM payment
+                    FROM EVLAD.payment
                     WHERE insurance_contract_id = g_ids(i);
                     DELETE
-                    FROM compensation_claim
+                    FROM EVLAD.compensation_claim
                     WHERE insurance_contract_id = g_ids(i);
-                    DELETE FROM insurance_contract WHERE id = g_ids(i);
+                    DELETE FROM EVLAD.insurance_contract WHERE id = g_ids(i);
                 END;
             END LOOP;
     END AFTER STATEMENT;
@@ -258,7 +268,7 @@ END AFTER EACH ROW;
 
 CREATE OR REPLACE PROCEDURE proc_check_and_archive IS
 BEGIN
-    UPDATE insurance_contract
+    UPDATE EVLAD.insurance_contract
     SET contract_status = 'Завершён'
     WHERE contract_status = 'Завершён';
 
@@ -272,21 +282,55 @@ BEGIN
             job_type => 'STORED_PROCEDURE',
             job_action => 'PROC_CHECK_AND_ARCHIVE',
             start_date => SYSTIMESTAMP,
-            repeat_interval => 'FREQ=MINUTELY; INTERVAL=10',
+            repeat_interval => 'FREQ=MINUTELY; INTERVAL=1',
             enabled => TRUE
     );
 END;
 /
 
--- UPDATE insurance_contract
--- SET contract_status = 'Завершён'
--- WHERE id = 1;
+SELECT job_name, enabled, state, repeat_interval, last_start_date, next_run_date
+FROM user_scheduler_jobs
+WHERE job_name = 'JOB_TRIGGER_ARCHIVE';
+
+
+
+UPDATE insurance_contract
+SET contract_status = 'Завершён'
+WHERE id = 1;
 
 -- Самостоятельно или при помощи преподавателя составить задание на
 -- DML триггер, который будет вызывать мутацию таблицы, на которую создан,
 -- в случае присутствия в теле триггера команды записи (INSERT INTO, UPDATE, DELETE)
 -- в ту же таблицу, и решить эту проблему одним из двух способов
 -- (при помощи переменных пакета и двух триггеров или при помощи COMPAUND-триггера).
+
+-- CREATE OR REPLACE PACKAGE pkg_trigger_control AS
+--     FUNCTION is_enabled RETURN BOOLEAN;
+--     PROCEDURE disable_trigger;
+--     PROCEDURE enable_trigger;
+-- END pkg_trigger_control;
+-- /
+--
+-- CREATE OR REPLACE PACKAGE BODY pkg_trigger_control AS
+--     g_trigger_enabled BOOLEAN := TRUE;
+--
+--     FUNCTION is_enabled RETURN BOOLEAN IS
+--     BEGIN
+--         RETURN g_trigger_enabled;
+--     END is_enabled;
+--
+--     PROCEDURE disable_trigger IS
+--     BEGIN
+--         g_trigger_enabled := FALSE;
+--     END disable_trigger;
+--
+--     PROCEDURE enable_trigger IS
+--     BEGIN
+--         g_trigger_enabled := TRUE;
+--     END enable_trigger;
+-- END pkg_trigger_control;
+-- /
+
 
 --будет мутация
 CREATE OR REPLACE TRIGGER trg_bad_client
@@ -298,41 +342,71 @@ BEGIN
 END;
 /
 
+INSERT INTO client (first_name, last_name, birth_date, phone_number) VALUES ('Наталья', 'Захарова', DATE '1998-06-29', '+375292112233');
+
+DROP TRIGGER trg_bad_client;
 
 -- не будет мутации
+-- Триггер, который создаёт копию вставленного клиента
+-- с уникальным номером телефона и корректным размером имени
 CREATE OR REPLACE TRIGGER trg_good_client
-    FOR INSERT
-    ON client
+    FOR INSERT ON client
     COMPOUND TRIGGER
+    TYPE t_client_rec IS RECORD (
+                                    first_name   client.first_name%TYPE,
+                                    last_name    client.last_name%TYPE,
+                                    birth_date   client.birth_date%TYPE,
+                                    phone_number client.phone_number%TYPE
+                                );
 
-    -- коллекция для хранения новых строк
-    TYPE t_clients IS TABLE OF client%ROWTYPE;
+    TYPE t_clients IS TABLE OF t_client_rec;
     g_clients t_clients := t_clients();
 
 AFTER EACH ROW IS
 BEGIN
-    -- сохраняем каждую вставленную строку в коллекцию
     g_clients.EXTEND;
-    g_clients(g_clients.LAST) := :NEW;
+    g_clients(g_clients.LAST).first_name   := :NEW.first_name;
+    g_clients(g_clients.LAST).last_name    := :NEW.last_name;
+    g_clients(g_clients.LAST).birth_date   := :NEW.birth_date;
+    g_clients(g_clients.LAST).phone_number := :NEW.phone_number;
 END AFTER EACH ROW;
 
     AFTER STATEMENT IS
+        v_phone_exists NUMBER;
+        v_new_phone    VARCHAR2(13);
     BEGIN
-        -- вставляем копии строк после завершения операции
-        FOR i IN 1 .. g_clients.COUNT
-            LOOP
-                INSERT INTO client (first_name, last_name, birth_date, phone_number)
-                VALUES (g_clients(i).first_name || ' (copy)',
-                        g_clients(i).last_name,
-                        g_clients(i).birth_date,
-                        g_clients(i).phone_number);
-            END LOOP;
+        IF pkg_trigger_control.is_enabled THEN
+            pkg_trigger_control.disable_trigger;
+
+            FOR i IN 1 .. g_clients.COUNT LOOP
+                    LOOP
+                        v_new_phone := '+375' || LPAD(TRUNC(DBMS_RANDOM.VALUE(100000000, 999999999)), 9, '0');
+
+                        SELECT COUNT(*) INTO v_phone_exists
+                        FROM client
+                        WHERE phone_number = v_new_phone;
+
+                        EXIT WHEN v_phone_exists = 0;
+                    END LOOP;
+
+                    INSERT INTO client (first_name, last_name, birth_date, phone_number)
+                    VALUES (
+                               SUBSTR(g_clients(i).first_name, 1, 3) || ' (copy)',
+                               g_clients(i).last_name,
+                               g_clients(i).birth_date,
+                               v_new_phone
+                           );
+                END LOOP;
+
+            pkg_trigger_control.enable_trigger;
+        END IF;
     END AFTER STATEMENT;
     END trg_good_client;
 /
 
--- INSERT INTO client (first_name, last_name, birth_date, phone_number)
--- VALUES ('Наталья', 'Захарова', DATE '1998-06-29', '+375491112233');
+
+INSERT INTO client (first_name, last_name, birth_date, phone_number)
+VALUES ('Ана', 'Бана', DATE '1998-06-29', '+375491236233');
 
 -- Написать триггер INSTEAD OF для работы с не обновляемым представлением, созданным после выполнения п. 2.4 задания к лабораторной работе №3,
 -- проверить DML-командами возможность обновления представления после включения триггера (логика работы триггера определяется спецификой предметной области варианта).
@@ -374,8 +448,8 @@ BEGIN
 END;
 /
 
--- INSERT INTO clients_working_hours_view (first_name, last_name, birth_date, phone_number)
--- VALUES ('Sergey', 'Sidorov', DATE '1995-03-15', '+375297837832');
+INSERT INTO clients_working_hours_view (first_name, last_name, birth_date, phone_number)
+VALUES ('Sergey', 'Sidorov', DATE '1995-03-15', '+375297837832');
 
 -- -- Удаление DML триггера для логирования изменений в insurance_contract
 -- DROP TRIGGER trg_contract_log;
