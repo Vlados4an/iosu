@@ -797,7 +797,16 @@ EXCEPTION
     WHEN OTHERS THEN
         DBMS_OUTPUT.PUT_LINE('Критическая ошибка в анонимном блоке: ' || SQLERRM);
 END;
-/
+/CREATE OR REPLACE VIEW clients_working_hours_view AS
+SELECT id,
+       first_name,
+       last_name,
+       birth_date,
+       phone_number
+FROM client
+WHERE TO_CHAR(SYSTIMESTAMP AT TIME ZONE 'Europe/Moscow', 'DY', 'NLS_DATE_LANGUAGE=RUSSIAN') NOT IN ('СБ', 'ВС')
+  AND EXTRACT(HOUR FROM (SYSTIMESTAMP AT TIME ZONE 'Europe/Moscow')) BETWEEN 9 AND 22
+WITH CHECK OPTION;
 
 
 --по одному вызову

@@ -55,28 +55,25 @@ WHERE id = 7;
 -- Вертикальное/смешанное необновляемое представление
 -- Детальное представление договоров с полной информацией (без ID автоинкремента)
 CREATE OR REPLACE VIEW insurance_contracts_detailed_view AS
-SELECT ic.contract_date                    AS "Дата_договора",
-       ic.contract_status                  AS "Статус",
-       ic.premium                          AS "Премия",
-       ic.unpaid_premium                   AS "Неуплаченная_премия",
-
-       c.first_name                        AS "Имя_клиента",
-       c.last_name                         AS "Фамилия_клиента",
-       TO_CHAR(c.birth_date, 'DD.MM.YYYY') AS "Дата_рождения_клиента",
-       c.phone_number                      AS "Телефон_клиента",
-
-       a.first_name                        AS "Имя_агента",
-       a.last_name                         AS "Фамилия_агента",
-       a.phone_number                      AS "Телефон_агента",
-
-       it.name                             AS "Тип_страхования",
-       it.max_payout                       AS "Макс_выплата",
-       it.age_limit                        AS "Возрастной_лимит"
+SELECT ic.contract_date,
+       ic.contract_status,
+       ic.premium,
+       ic.unpaid_premium,
+       c.first_name   AS client_first_name,
+       c.last_name    AS client_last_name,
+       c.birth_date   AS client_birth_date,
+       c.phone_number AS client_phone,
+       a.first_name   AS agent_first_name,
+       a.last_name    AS agent_last_name,
+       a.phone_number AS agent_phone,
+       it.name        AS insurance_type_name,
+       it.max_payout,
+       it.age_limit
 FROM insurance_contract ic
-         FULL JOIN client c ON ic.client_id = c.id
-         FULL JOIN agent a ON ic.agent_id = a.id
-         FULL JOIN insurance_type it ON ic.insurance_type_id = it.id
-ORDER BY ic.contract_date DESC;
+         JOIN client c ON ic.client_id = c.id
+         JOIN agent a ON ic.agent_id = a.id
+         JOIN insurance_type it ON ic.insurance_type_id = it.id;
+
 
 -- Доказательство необновляемости представления
 
@@ -108,16 +105,7 @@ SELECT id,
 FROM client
 WITH CHECK OPTION;
 
-CREATE OR REPLACE VIEW clients_working_hours_view AS
-SELECT id,
-       first_name,
-       last_name,
-       birth_date,
-       phone_number
-FROM client
-WHERE TO_CHAR(SYSTIMESTAMP AT TIME ZONE 'Europe/Moscow', 'DY', 'NLS_DATE_LANGUAGE=RUSSIAN') NOT IN ('СБ', 'ВС')
-  AND EXTRACT(HOUR FROM (SYSTIMESTAMP AT TIME ZONE 'Europe/Moscow')) BETWEEN 9 AND 22
-WITH CHECK OPTION;
+
 
 -- Триггер для ограничения по времени работы
 CREATE OR REPLACE TRIGGER clients_working_hours_trigger
