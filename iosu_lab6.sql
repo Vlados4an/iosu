@@ -194,11 +194,43 @@ BEGIN
 END;
 /
 
+CREATE OR REPLACE PROCEDURE get_column_stats(
+    p_table_name IN VARCHAR2,
+    p_column_name IN VARCHAR2
+) AUTHID DEFINER  IS
+    l_sql       VARCHAR2(4000);
+    l_cnt       NUMBER;
+    l_distinct  NUMBER;
+    l_nulls     NUMBER;
+BEGIN
+    l_sql := 'SELECT COUNT(*), COUNT(DISTINCT ' || p_column_name || '), ' ||
+             'SUM(CASE WHEN ' || p_column_name || ' IS NULL THEN 1 ELSE 0 END) ' ||
+             'FROM ' || p_table_name;
+
+    EXECUTE IMMEDIATE l_sql INTO l_cnt, l_distinct, l_nulls;
+
+    DBMS_OUTPUT.PUT_LINE('Таблица: ' || p_table_name);
+    DBMS_OUTPUT.PUT_LINE('Поле: ' || p_column_name);
+    DBMS_OUTPUT.PUT_LINE('Всего записей: ' || l_cnt);
+    DBMS_OUTPUT.PUT_LINE('Уникальных значений: ' || l_distinct);
+    DBMS_OUTPUT.PUT_LINE('NULL значений: ' || l_nulls);
+END;
+/
+
+SELECT * FROM EVLAD.CLIENT;
+
+-- GRANT EXECUTE ON get_column_stats_with_authid TO USER2;
+
+BEGIN
+    EVLAD.get_column_stats('CLIENT', 'PHONE_NUMBER');
+END;
+/
+
 
 -- Создать процедуру, которая принимает в качестве параметра имя таблицы и имя поля в этой таблице.
 -- Процедура подсчитывает и выводит на экран статистику по этой таблице: количество записей, имя поля,
 -- количество различных значений поля, количество null-значений.
-CREATE OR REPLACE PROCEDURE get_column_stats(
+CREATE OR REPLACE PROCEDURE get_column_stats_with_authid(
     p_table_name IN VARCHAR2,
     p_column_name IN VARCHAR2
 ) AUTHID CURRENT_USER IS
@@ -222,7 +254,7 @@ END;
 /
 
 BEGIN
-    get_column_stats('CLIENT', 'PHONE_NUMBER');
+    EVLAD.get_column_stats_with_authid('CLIENT', 'PHONE_NUMBER');
 END;
 /
 
