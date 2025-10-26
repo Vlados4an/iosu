@@ -355,7 +355,7 @@ BEGIN
 
     IF v_count >= 3 THEN
         UPDATE insurance_contract
-        SET premium = premium * 0.9,
+        SET premium        = premium * 0.9,
             unpaid_premium = unpaid_premium * 0.9
         WHERE id = :NEW.id;
     END IF;
@@ -375,48 +375,70 @@ DROP TRIGGER trg_bad_discount;
 
 -- не будет мутации
 -- Создать триггер на таблицу insurance_contract, который при добавлении нового договора проверяет, сколько договоров у данного клиента уже заключено.
--- Если клиент заключает третий и каждый последующий договор, то ему предоставляется скидка на страховую премию — например, 10% от суммы премии.
+-- Если клиент заключает третий и каждый последующий договор, то всем его предыдущим договорам (кроме только что вставленного)
 CREATE OR REPLACE TRIGGER trg_good_discount
-    FOR INSERT
-    ON insurance_contract
+    FOR INSERT OR UPDATE OF client_id ON insurance_contract
     COMPOUND TRIGGER
-    TYPE t_contract IS RECORD
-                       (
-                           id        insurance_contract.id%TYPE,
-                           client_id insurance_contract.client_id%TYPE
-                       );
 
+    TYPE t_contract IS RECORD (
+                                  id        insurance_contract.id%TYPE,
+                                  client_id insurance_contract.client_id%TYPE
+                              );
     TYPE t_contracts IS TABLE OF t_contract;
-    g_contracts t_contracts := t_contracts();
+
+    g_contracts      t_contracts := t_contracts();
+    g_is_processing  BOOLEAN := FALSE;
 
 AFTER EACH ROW IS
 BEGIN
-    g_contracts.EXTEND;
-    g_contracts(g_contracts.LAST).id := :NEW.id;
-    g_contracts(g_contracts.LAST).client_id := :NEW.client_id;
+    IF NOT g_is_processing THEN
+        g_contracts.EXTEND;
+        g_contracts(g_contracts.LAST).id := :NEW.id;
+        g_contracts(g_contracts.LAST).client_id := :NEW.client_id;
+    END IF;
 END AFTER EACH ROW;
 
     AFTER STATEMENT IS
         v_count NUMBER;
     BEGIN
-        FOR i IN 1 .. g_contracts.COUNT
-            LOOP
-                SELECT COUNT(*)
-                INTO v_count
-                FROM insurance_contract
-                WHERE client_id = g_contracts(i).client_id;
+        IF NOT g_is_processing THEN
+            g_is_processing := TRUE;
 
-                IF v_count >= 3 THEN
-                    UPDATE insurance_contract
-                    SET premium = premium * 0.9,
-                        unpaid_premium = unpaid_premium * 0.9
-                    WHERE id = g_contracts(i).id;
-                END IF;
-            END LOOP;
+            FOR i IN 1 .. g_contracts.COUNT LOOP
+                    SELECT COUNT(*) INTO v_count
+                    FROM insurance_contract
+                    WHERE client_id = g_contracts(i).client_id;
+
+                    IF v_count >= 3 THEN
+                        UPDATE insurance_contract ic
+                        SET ic.premium        = ROUND(ic.premium * 0.9, 2),
+                            ic.unpaid_premium = ROUND(ic.unpaid_premium * 0.9, 2)
+                        WHERE ic.client_id = g_contracts(i).client_id
+                          AND ic.id != g_contracts(i).id
+
+                          AND NOT EXISTS (
+                            SELECT 1
+                            FROM insurance_contract tmp
+                            WHERE tmp.id = ic.id
+                              AND tmp.premium < ic.premium
+                        );
+                    END IF;
+                END LOOP;
+
+            g_is_processing := FALSE;
+            g_contracts := t_contracts();
+        END IF;
     END AFTER STATEMENT;
+
     END trg_good_discount;
 /
 
+
+
+
+update insurance_contract
+set client_id = 1
+where id = 3;
 
 INSERT INTO insurance_contract (contract_date, contract_status, payout_deadline, agent_id, client_id, insurance_type_id,
                                 premium, unpaid_premium)
@@ -428,47 +450,49 @@ CREATE OR REPLACE TRIGGER insurance_contracts_detailed_trg
     INSTEAD OF INSERT OR UPDATE OR DELETE
     ON insurance_contracts_detailed_view
 DECLARE
-    v_current_day  VARCHAR2(20);
-    v_current_hour NUMBER;
-    v_current_time TIMESTAMP WITH TIME ZONE;
-
-    v_client_id client.id%TYPE;
-    v_agent_id  agent.id%TYPE;
-    v_type_id   insurance_type.id%TYPE;
+    v_client_id    client.id%TYPE;
+    v_agent_id     agent.id%TYPE;
+    v_type_id      insurance_type.id%TYPE;
 BEGIN
-    -- проверка времени
-    v_current_time := SYSTIMESTAMP AT TIME ZONE 'Europe/Moscow';
-    v_current_day := TO_CHAR(v_current_time, 'DY', 'NLS_DATE_LANGUAGE=RUSSIAN');
-    v_current_hour := EXTRACT(HOUR FROM v_current_time);
-
-    IF v_current_day IN ('СБ', 'ВС') THEN
-        RAISE_APPLICATION_ERROR(-20001,
-                                'Операции разрешены только в рабочие дни (пн–пт). Сегодня: ' || v_current_day);
-    END IF;
-
-    IF v_current_hour < 9 OR v_current_hour >= 17 THEN
-        RAISE_APPLICATION_ERROR(-20002,
-                                'Операции разрешены только с 9:00 до 17:00. Сейчас: ' || v_current_hour || ':00');
-    END IF;
-
     CASE
         WHEN INSERTING THEN
-            -- клиент
-            INSERT INTO client (first_name, last_name, birth_date, phone_number)
-            VALUES (:NEW.client_first_name, :NEW.client_last_name, :NEW.client_birth_date, :NEW.client_phone)
-            RETURNING id INTO v_client_id;
+            BEGIN
+                SELECT id INTO v_client_id
+                FROM client
+                WHERE first_name = :NEW.client_first_name
+                  AND last_name = :NEW.client_last_name
+                  AND phone_number = :NEW.client_phone;
+            EXCEPTION
+                WHEN NO_DATA_FOUND THEN
+                    INSERT INTO client (first_name, last_name, birth_date, phone_number)
+                    VALUES (:NEW.client_first_name, :NEW.client_last_name, :NEW.client_birth_date, :NEW.client_phone)
+                    RETURNING id INTO v_client_id;
+            END;
 
-            -- агент
-            INSERT INTO agent (first_name, last_name, phone_number)
-            VALUES (:NEW.agent_first_name, :NEW.agent_last_name, :NEW.agent_phone)
-            RETURNING id INTO v_agent_id;
+            BEGIN
+                SELECT id INTO v_agent_id
+                FROM agent
+                WHERE first_name = :NEW.agent_first_name
+                  AND last_name = :NEW.agent_last_name
+                  AND phone_number = :NEW.agent_phone;
+            EXCEPTION
+                WHEN NO_DATA_FOUND THEN
+                    INSERT INTO agent (first_name, last_name, phone_number)
+                    VALUES (:NEW.agent_first_name, :NEW.agent_last_name, :NEW.agent_phone)
+                    RETURNING id INTO v_agent_id;
+            END;
 
-            -- тип страховки
-            INSERT INTO insurance_type (name, max_payout, age_limit)
-            VALUES (:NEW.insurance_type_name, :NEW.max_payout, :NEW.age_limit)
-            RETURNING id INTO v_type_id;
+            BEGIN
+                SELECT id INTO v_type_id
+                FROM insurance_type
+                WHERE name = :NEW.insurance_type_name;
+            EXCEPTION
+                WHEN NO_DATA_FOUND THEN
+                    INSERT INTO insurance_type (name, max_payout, age_limit)
+                    VALUES (:NEW.insurance_type_name, :NEW.max_payout, :NEW.age_limit)
+                    RETURNING id INTO v_type_id;
+            END;
 
-            -- договор
             INSERT INTO insurance_contract (contract_date, contract_status, premium, unpaid_premium,
                                             client_id, agent_id, insurance_type_id)
             VALUES (:NEW.contract_date, :NEW.contract_status, :NEW.premium, :NEW.unpaid_premium,
@@ -480,45 +504,47 @@ BEGIN
                 contract_status = :NEW.contract_status,
                 premium         = :NEW.premium,
                 unpaid_premium  = :NEW.unpaid_premium
-            WHERE contract_date   = :OLD.contract_date
-              AND contract_status = :OLD.contract_status
-              AND premium         = :OLD.premium
-              AND unpaid_premium  = :OLD.unpaid_premium;
+            WHERE id = :OLD.contract_id;
 
             UPDATE client
             SET first_name   = :NEW.client_first_name,
                 last_name    = :NEW.client_last_name,
                 birth_date   = :NEW.client_birth_date,
                 phone_number = :NEW.client_phone
-            WHERE first_name   = :OLD.client_first_name
-              AND last_name    = :OLD.client_last_name
-              AND phone_number = :OLD.client_phone;
+            WHERE id = :OLD.client_id;
 
             UPDATE agent
             SET first_name   = :NEW.agent_first_name,
                 last_name    = :NEW.agent_last_name,
                 phone_number = :NEW.agent_phone
-            WHERE first_name   = :OLD.agent_first_name
-              AND last_name    = :OLD.agent_last_name
-              AND phone_number = :OLD.agent_phone;
+            WHERE id = :OLD.agent_id;
 
-            UPDATE insurance_type
-            SET name       = :NEW.insurance_type_name,
-                max_payout = :NEW.max_payout,
-                age_limit  = :NEW.age_limit
-            WHERE name       = :OLD.insurance_type_name;
+            BEGIN
+                SELECT id INTO v_type_id FROM insurance_type WHERE name = :NEW.insurance_type_name;
+            EXCEPTION
+                WHEN NO_DATA_FOUND THEN
+                    INSERT INTO insurance_type (name, max_payout, age_limit)
+                    VALUES (:NEW.insurance_type_name, :NEW.max_payout, :NEW.age_limit)
+                    RETURNING id INTO v_type_id;
+            END;
+
+            UPDATE insurance_contract
+            SET insurance_type_id = v_type_id
+            WHERE id = :OLD.contract_id;
 
         WHEN DELETING THEN
-            DELETE FROM insurance_contract
-            WHERE contract_date   = :OLD.contract_date
-              AND contract_status = :OLD.contract_status
-              AND premium         = :OLD.premium
-              AND unpaid_premium  = :OLD.unpaid_premium;
+            DELETE FROM insurance_contract WHERE id = :OLD.contract_id;
         END CASE;
 END;
 /
 
 
+UPDATE insurance_contracts_detailed_view
+SET INSURANCE_TYPE_NAME = 'лучшая жизнь'
+WHERE INSURANCE_TYPE_NAME = 'new types';
+
+delete from insurance_contracts_detailed_view
+where CLIENT_LAST_NAME = 'Сидоров';
 
 
 INSERT INTO insurance_contracts_detailed_view
@@ -526,14 +552,16 @@ INSERT INTO insurance_contracts_detailed_view
  client_first_name, client_last_name, client_birth_date, client_phone,
  agent_first_name, agent_last_name, agent_phone,
  insurance_type_name, max_payout, age_limit)
-VALUES
-    (DATE '2025-01-01', 'ACTIVE', 1000, 1000,
-     'Сергей', 'Сидоров', DATE '1990-03-15', '+375291234567',
-     'Анна', 'Кузнецова', '+375298765432',
-     'КАСКО', 20000, 65);
+VALUES (DATE '2025-01-01', 'Активен', 1000, 1000,
+        'Сергей', 'Сидоров', DATE '1990-03-15', '+375292534567',
+        'Анна', 'Кузнецова', '+375295565432',
+        'КАСКО775', 20000, 65);
 
 
--- -- Удаление DML триггера для логирования изменений в insurance_contract
+
+DROP TRIGGER INSURANCE_CONTRACTS_DETAILED_TRG
+
+-- Удаление DML триггера для логирования изменений в insurance_contract
 -- DROP TRIGGER trg_contract_log;
 --
 -- -- Удаление DDL триггера

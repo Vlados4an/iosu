@@ -55,17 +55,21 @@ WHERE id = 7;
 -- Вертикальное/смешанное необновляемое представление
 -- Детальное представление договоров с полной информацией (без ID автоинкремента)
 CREATE OR REPLACE VIEW insurance_contracts_detailed_view AS
-SELECT ic.contract_date,
+SELECT ic.id AS contract_id,
+       ic.contract_date,
        ic.contract_status,
        ic.premium,
        ic.unpaid_premium,
+       c.id AS client_id,
        c.first_name   AS client_first_name,
        c.last_name    AS client_last_name,
        c.birth_date   AS client_birth_date,
        c.phone_number AS client_phone,
+       a.id AS agent_id,
        a.first_name   AS agent_first_name,
        a.last_name    AS agent_last_name,
        a.phone_number AS agent_phone,
+       it.id AS insurance_type_id,
        it.name        AS insurance_type_name,
        it.max_payout,
        it.age_limit
@@ -74,26 +78,65 @@ FROM insurance_contract ic
          JOIN agent a ON ic.agent_id = a.id
          JOIN insurance_type it ON ic.insurance_type_id = it.id;
 
+select * from insurance_contracts_detailed_view
+
+
 
 -- Доказательство необновляемости представления
 
--- 1. INSERT - попытка вставить новую запись
-INSERT INTO insurance_contracts_detailed_view ("Дата_договора", "Статус", "Премия", "Имя_клиента", "Фамилия_клиента",
-                                               "Имя_агента", "Фамилия_агента", "Тип_страхования")
-VALUES (SYSDATE, 'Активен', 1500, 'Новый', 'Клиент', 'Новый', 'Агент', 'Жизнь');
--- Ошибка: "ORA-01733: виртуальный столбец здесь недопустим"
+-- 1. Попытка вставить новую запись (INSERT)
+INSERT INTO insurance_contracts_detailed_view (
+    contract_date,
+    contract_status,
+    premium,
+    unpaid_premium,
+    client_first_name,
+    client_last_name,
+    client_birth_date,
+    client_phone,
+    agent_first_name,
+    agent_last_name,
+    agent_phone,
+    insurance_type_name,
+    max_payout,
+    age_limit
+)
+VALUES (
+                   SYSDATE,
+                   'АКТИВЕН',
+                   1500,
+                   1500,
+                   'Новый',
+                   'Клиент',
+                   DATE '1995-06-01',
+                   '+375291112233',
+                   'Новый',
+                   'Агент',
+                   '+375292223344',
+                   'Жизнь',
+                   100000,
+                   65
+       );
+-- Ожидаемая ошибка:
+-- ORA-01779: cannot modify a column which maps to a non key-preserved table
 
--- 2. UPDATE - попытка обновить данные
+--------------------------------------------------
+
+-- 2. Попытка обновить запись (UPDATE)
 UPDATE insurance_contracts_detailed_view
-SET "Премия" = 2000
-WHERE "Фамилия_клиента" = 'Петров';
--- Ошибка: "ORA-01733: виртуальный столбец здесь недопустим"
+SET premium = 2000
+WHERE client_last_name = 'Сидоров';
+-- Ожидаемая ошибка:
+-- ORA-01779: cannot modify a column which maps to a non key-preserved table
 
--- 3. DELETE - попытка удалить запись
-DELETE
-FROM insurance_contracts_detailed_view
-WHERE "Фамилия_клиента" = 'Сидорова';
--- Ошибка: "ORA-01752: не могу удалять из представления без таблицы, сохраняющей ключ"
+--------------------------------------------------
+
+-- 3. Попытка удалить запись (DELETE)
+DELETE FROM insurance_contracts_detailed_view
+WHERE client_last_name = 'Сидоров';
+-- Ожидаемая ошибка:
+-- ORA-01752: cannot delete from view without exactly one key-preserved table
+
 
 -- Представление для работы с клиентами только в рабочие дни и часы
 CREATE OR REPLACE VIEW clients_working_hours_view AS
