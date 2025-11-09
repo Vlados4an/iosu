@@ -433,9 +433,6 @@ END AFTER EACH ROW;
     END trg_good_discount;
 /
 
-
-
-
 update insurance_contract
 set client_id = 1
 where id = 3;
